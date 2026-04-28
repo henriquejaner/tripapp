@@ -31,7 +31,13 @@
     },
     "plugins": [
       "expo-router",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Used to suggest weekend trips from your city."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

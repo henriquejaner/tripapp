@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { useFocusEffect, router } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
+import * as Location from 'expo-location';
 import { supabase } from '@/lib/supabase';
 import { Colors } from '@/lib/colors';
 
@@ -31,31 +32,7 @@ interface WeekendDest {
   flightHours: string;
   budgetPerDay: number;
   vibe: string;
-  photo: string;
 }
-
-const WEEKEND_PICKS: WeekendDest[] = [
-  { destination: 'Lisbon', country: 'Portugal', flightHours: '1h 30m', budgetPerDay: 75, vibe: 'culture',
-    photo: 'https://images.unsplash.com/photo-1555881400-74d7acaacd8b?w=400&h=220&fit=crop&q=80' },
-  { destination: 'Porto', country: 'Portugal', flightHours: '1h 20m', budgetPerDay: 65, vibe: 'food',
-    photo: 'https://images.unsplash.com/photo-1555993539-1732b0258235?w=400&h=220&fit=crop&q=80' },
-  { destination: 'Barcelona', country: 'Spain', flightHours: '1h 05m', budgetPerDay: 90, vibe: 'beach',
-    photo: 'https://images.unsplash.com/photo-1539037116277-4db20889f2d4?w=400&h=220&fit=crop&q=80' },
-  { destination: 'Paris', country: 'France', flightHours: '2h 05m', budgetPerDay: 120, vibe: 'culture',
-    photo: 'https://images.unsplash.com/photo-1502602898657-3e91760cbb34?w=400&h=220&fit=crop&q=80' },
-  { destination: 'Marrakech', country: 'Morocco', flightHours: '2h 50m', budgetPerDay: 50, vibe: 'adventure',
-    photo: 'https://images.unsplash.com/photo-1539650116574-8efeb43e2750?w=400&h=220&fit=crop&q=80' },
-  { destination: 'Rome', country: 'Italy', flightHours: '2h 20m', budgetPerDay: 95, vibe: 'culture',
-    photo: 'https://images.unsplash.com/photo-1552832230-c0197dd311b5?w=400&h=220&fit=crop&q=80' },
-  { destination: 'Amsterdam', country: 'Netherlands', flightHours: '2h 40m', budgetPerDay: 100, vibe: 'city',
-    photo: 'https://images.unsplash.com/photo-1534351590666-13e3e96b5017?w=400&h=220&fit=crop&q=80' },
-  { destination: 'Prague', country: 'Czech Republic', flightHours: '2h 50m', budgetPerDay: 65, vibe: 'nightlife',
-    photo: 'https://images.unsplash.com/photo-1541849546-216549ae216d?w=400&h=220&fit=crop&q=80' },
-  { destination: 'Budapest', country: 'Hungary', flightHours: '3h 00m', budgetPerDay: 60, vibe: 'nightlife',
-    photo: 'https://images.unsplash.com/photo-1549180030-48bf079fb38a?w=400&h=220&fit=crop&q=80' },
-  { destination: 'Copenhagen', country: 'Denmark', flightHours: '3h 10m', budgetPerDay: 130, vibe: 'city',
-    photo: 'https://images.unsplash.com/photo-1513622470522-26c3c8a854bc?w=400&h=220&fit=crop&q=80' },
-];
 
 const VIBE_ICON: Record<string, string> = {
   beach: 'sun-o', culture: 'institution', adventure: 'tree',
@@ -89,7 +66,11 @@ export default function DiscoverScreen() {
   const [loading, setLoading] = useState(true);
   const [aiSuggestions, setAiSuggestions] = useState<AISuggestion[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
+  const [weekendPicks, setWeekendPicks] = useState<WeekendDest[]>([]);
+  const [weekendLoading, setWeekendLoading] = useState(false);
+  const [userCity, setUserCity] = useState<string>('Madrid');
   const aiLoaded = useRef(false);
+  const weekendLoaded = useRef(false);
 
   useFocusEffect(useCallback(() => {
     fetchPublicTrips();
@@ -97,7 +78,58 @@ export default function DiscoverScreen() {
       aiLoaded.current = true;
       generateAISuggestions();
     }
+    if (!weekendLoaded.current) {
+      weekendLoaded.current = true;
+      loadWeekendPicks();
+    }
   }, []));
+
+  async function loadWeekendPicks() {
+    setWeekendLoading(true);
+    let city = 'Madrid';
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Low });
+        const [geo] = await Location.reverseGeocodeAsync(loc.coords);
+        city = geo.city ?? geo.subregion ?? geo.region ?? 'Madrid';
+      }
+    } catch {}
+    setUserCity(city);
+    await generateWeekendPicks(city);
+    setWeekendLoading(false);
+  }
+
+  async function generateWeekendPicks(city: string) {
+    const apiKey = process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY;
+    if (!apiKey) return;
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 800,
+          messages: [{
+            role: 'user',
+            content: `Suggest 8 weekend trip destinations reachable from ${city}. Mix nearby hidden gems (1-2h away by plane or train) with famous popular destinations (2-4h away). Vary the vibes.
+
+Return ONLY a valid raw JSON array (no markdown, no code blocks):
+[{"destination":"City","country":"Country","flightHours":"1h 30m","budgetPerDay":75,"vibe":"beach|culture|adventure|nightlife|food|nature|city"}]`,
+          }],
+        }),
+      });
+      const data = await res.json();
+      const text = data.content?.[0]?.text ?? '[]';
+      const clean = text.trim().replace(/^```json?\n?/, '').replace(/\n?```$/, '');
+      setWeekendPicks(JSON.parse(clean));
+    } catch {}
+  }
 
   async function fetchPublicTrips() {
     setLoading(true);
@@ -304,52 +336,41 @@ Return ONLY a valid raw JSON array (no markdown, no code blocks):
                 </>
               )}
 
-              {/* Weekend from Madrid */}
+              {/* Weekend from user's city */}
               <View style={styles.sectionRow}>
                 <FontAwesome name="plane" size={12} color={Colors.textSecondary} />
-                <Text style={styles.sectionTitle}>Weekend from Madrid</Text>
+                <Text style={styles.sectionTitle}>Weekend from {userCity}</Text>
               </View>
+              {weekendLoading ? (
+                <View style={styles.aiLoadingRow}>
+                  <ActivityIndicator size="small" color={Colors.primary} />
+                  <Text style={styles.aiLoadingText}>Finding trips near you...</Text>
+                </View>
+              ) : (
               <ScrollView
                 horizontal showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.weekendScroll}
               >
-                {WEEKEND_PICKS.map(d => {
+                {weekendPicks.map(d => {
                   const color = VIBE_COLOR[d.vibe] ?? Colors.primary;
+                  const photoUrl = `https://source.unsplash.com/400x220/?${encodeURIComponent(d.destination)},travel,city`;
                   const tripCount = trendingDests.find(t =>
                     t.destination.toLowerCase().includes(d.destination.toLowerCase())
                   )?.count ?? 0;
                   return (
-                    <TouchableOpacity
+                    <WeekendCard
                       key={d.destination}
-                      style={styles.weekendCard}
+                      dest={d}
+                      color={color}
+                      photoUrl={photoUrl}
+                      tripCount={tripCount}
                       onPress={() => setSearch(d.destination)}
-                      activeOpacity={0.85}
-                    >
-                      <View style={styles.weekendImageWrap}>
-                        <Image source={{ uri: d.photo }} style={styles.weekendImage} resizeMode="cover" />
-                        <View style={styles.weekendImageOverlay} />
-                        <View style={[styles.weekendVibePill, { backgroundColor: color }]}>
-                          <FontAwesome name={(VIBE_ICON[d.vibe] ?? 'map-marker') as any} size={9} color="#fff" />
-                        </View>
-                        {tripCount > 0 && (
-                          <View style={styles.weekendTripBadge}>
-                            <Text style={styles.weekendTripBadgeText}>{tripCount} trip{tripCount !== 1 ? 's' : ''}</Text>
-                          </View>
-                        )}
-                      </View>
-                      <View style={styles.weekendBody}>
-                        <Text style={styles.weekendCity}>{d.destination}</Text>
-                        <Text style={styles.weekendCountry}>{d.country}</Text>
-                        <View style={styles.weekendMeta}>
-                          <FontAwesome name="clock-o" size={9} color={Colors.textMuted} />
-                          <Text style={styles.weekendMetaText}>{d.flightHours}</Text>
-                        </View>
-                        <Text style={[styles.weekendBudget, { color }]}>~€{d.budgetPerDay}/day</Text>
-                      </View>
-                    </TouchableOpacity>
+                    />
                   );
                 })}
               </ScrollView>
+              )}
+
 
               {/* Public trips header */}
               <View style={styles.sectionRow}>
@@ -384,6 +405,46 @@ Return ONLY a valid raw JSON array (no markdown, no code blocks):
         renderItem={({ item }) => <PublicTripCard trip={item} />}
       />
     </SafeAreaView>
+  );
+}
+
+function WeekendCard({ dest, color, photoUrl, tripCount, onPress }: {
+  dest: WeekendDest; color: string; photoUrl: string; tripCount: number; onPress: () => void;
+}) {
+  const [photoFailed, setPhotoFailed] = useState(false);
+  return (
+    <TouchableOpacity style={styles.weekendCard} onPress={onPress} activeOpacity={0.85}>
+      <View style={styles.weekendImageWrap}>
+        {!photoFailed ? (
+          <Image
+            source={{ uri: photoUrl }}
+            style={styles.weekendImage}
+            resizeMode="cover"
+            onError={() => setPhotoFailed(true)}
+          />
+        ) : (
+          <View style={[styles.weekendImage, { backgroundColor: color + '33' }]} />
+        )}
+        <View style={styles.weekendImageOverlay} />
+        <View style={[styles.weekendVibePill, { backgroundColor: color }]}>
+          <FontAwesome name={(VIBE_ICON[dest.vibe] ?? 'map-marker') as any} size={9} color="#fff" />
+        </View>
+        {tripCount > 0 && (
+          <View style={styles.weekendTripBadge}>
+            <Text style={styles.weekendTripBadgeText}>{tripCount} trip{tripCount !== 1 ? 's' : ''}</Text>
+          </View>
+        )}
+      </View>
+      <View style={styles.weekendBody}>
+        <Text style={styles.weekendCity}>{dest.destination}</Text>
+        <Text style={styles.weekendCountry}>{dest.country}</Text>
+        <View style={styles.weekendMeta}>
+          <FontAwesome name="clock-o" size={9} color={Colors.textMuted} />
+          <Text style={styles.weekendMetaText}>{dest.flightHours}</Text>
+        </View>
+        <Text style={[styles.weekendBudget, { color }]}>~€{dest.budgetPerDay}/day</Text>
+      </View>
+    </TouchableOpacity>
   );
 }
 
