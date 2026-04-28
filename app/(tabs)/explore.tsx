@@ -44,7 +44,7 @@ const WEEKEND_PICKS: WeekendDest[] = [
   { destination: 'Paris', country: 'France', flightHours: '2h 05m', budgetPerDay: 120, vibe: 'culture',
     photo: 'https://images.unsplash.com/photo-1502602898657-3e91760cbb34?w=400&h=220&fit=crop&q=80' },
   { destination: 'Marrakech', country: 'Morocco', flightHours: '2h 50m', budgetPerDay: 50, vibe: 'adventure',
-    photo: 'https://images.unsplash.com/photo-1597212618440-806262de1f04?w=400&h=220&fit=crop&q=80' },
+    photo: 'https://images.unsplash.com/photo-1539650116574-8efeb43e2750?w=400&h=220&fit=crop&q=80' },
   { destination: 'Rome', country: 'Italy', flightHours: '2h 20m', budgetPerDay: 95, vibe: 'culture',
     photo: 'https://images.unsplash.com/photo-1552832230-c0197dd311b5?w=400&h=220&fit=crop&q=80' },
   { destination: 'Amsterdam', country: 'Netherlands', flightHours: '2h 40m', budgetPerDay: 100, vibe: 'city',
@@ -52,7 +52,7 @@ const WEEKEND_PICKS: WeekendDest[] = [
   { destination: 'Prague', country: 'Czech Republic', flightHours: '2h 50m', budgetPerDay: 65, vibe: 'nightlife',
     photo: 'https://images.unsplash.com/photo-1541849546-216549ae216d?w=400&h=220&fit=crop&q=80' },
   { destination: 'Budapest', country: 'Hungary', flightHours: '3h 00m', budgetPerDay: 60, vibe: 'nightlife',
-    photo: 'https://images.unsplash.com/photo-1541350781664-0f5d8ba7abb5?w=400&h=220&fit=crop&q=80' },
+    photo: 'https://images.unsplash.com/photo-1549180030-48bf079fb38a?w=400&h=220&fit=crop&q=80' },
   { destination: 'Copenhagen', country: 'Denmark', flightHours: '3h 10m', budgetPerDay: 130, vibe: 'city',
     photo: 'https://images.unsplash.com/photo-1513622470522-26c3c8a854bc?w=400&h=220&fit=crop&q=80' },
 ];
