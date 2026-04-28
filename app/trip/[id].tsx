@@ -521,13 +521,12 @@ function MapTab({ tripId, stops, refreshing, onRefresh }: {
     try {
       const { data: ideas } = await supabase
         .from('ideas')
-        .select('title, tab_id')
-        .eq('trip_id', tripId)
-        .eq('status', 'confirmed');
+        .select('title, status')
+        .eq('trip_id', tripId);
 
       if (ideas?.length && stops[0]?.destination) {
         const city = stops[0].destination.split(',')[0].trim();
-        for (const idea of ideas.slice(0, 8)) {
+        for (const idea of ideas.slice(0, 10)) {
           try {
             const q = `${idea.title}, ${city}`;
             const res = await fetch(
@@ -535,16 +534,15 @@ function MapTab({ tripId, stops, refreshing, onRefresh }: {
               { headers: { 'Accept-Language': 'en' } }
             );
             const data = await res.json();
-            if (data[0] && parseFloat(data[0].importance) > 0.3) {
+            if (data[0] && parseFloat(data[0].importance) > 0.15) {
               results.push({
                 name: idea.title,
                 lat: parseFloat(data[0].lat),
                 lng: parseFloat(data[0].lon),
-                type: 'idea',
+                type: idea.status === 'confirmed' ? 'confirmed' : 'idea',
               });
             }
           } catch {}
-          // Nominatim rate limit: 1 req/sec
           await new Promise(r => setTimeout(r, 1100));
         }
       }
@@ -660,25 +658,40 @@ function generateMapHtml(locations: { name: string; lat: number; lng: number; ty
       return L.divIcon({ html: html, className: '', iconAnchor: [0, 0] });
     }
 
-    function makeIdeaIcon() {
+    function makeIdeaIcon(confirmed) {
+      var color = confirmed ? '#00A878' : '#3D7EFF';
       var html = '<div style="'
-        + 'background:#3D7EFF;'
-        + 'width:10px;height:10px;border-radius:50%;'
-        + 'border:2px solid #fff;'
-        + 'box-shadow:0 1px 4px rgba(0,0,0,0.3);'
+        + 'background:' + color + ';'
+        + 'width:11px;height:11px;border-radius:50%;'
+        + 'border:2.5px solid #fff;'
+        + 'box-shadow:0 1px 5px rgba(0,0,0,0.3);'
         + '"></div>';
-      return L.divIcon({ html: html, className: '', iconSize: [10,10], iconAnchor: [5,5] });
+      return L.divIcon({ html: html, className: '', iconSize: [11,11], iconAnchor: [5,5] });
+    }
+
+    var stops = markers.filter(function(m) { return m.type === 'stop'; });
+    var ideas = markers.filter(function(m) { return m.type !== 'stop'; });
+
+    // Draw route polyline between stops
+    if (stops.length > 1) {
+      L.polyline(stops.map(function(s) { return [s.lat, s.lng]; }), {
+        color: '#E8622A', weight: 2.5, opacity: 0.6, dashArray: '6, 8'
+      }).addTo(map);
     }
 
     if (markers.length === 0) {
       map.setView([20, 10], 2);
     } else {
-      markers.forEach(function(m) {
-        var icon = m.type === 'stop' ? makeStopIcon(m.name) : makeIdeaIcon();
-        var popup = m.type === 'stop'
-          ? '<div class="stop-label">' + m.name + '</div>'
-          : '<div class="idea-label">' + m.name + '</div>';
-        L.marker([m.lat, m.lng], { icon: icon }).addTo(map).bindPopup(popup);
+      stops.forEach(function(m) {
+        L.marker([m.lat, m.lng], { icon: makeStopIcon(m.name) })
+          .addTo(map)
+          .bindPopup('<div class="stop-label">' + m.name + '</div>');
+      });
+      ideas.forEach(function(m) {
+        var confirmed = m.type === 'confirmed';
+        L.marker([m.lat, m.lng], { icon: makeIdeaIcon(confirmed) })
+          .addTo(map)
+          .bindPopup('<div class="idea-label">' + (confirmed ? '✓ ' : '') + m.name + '</div>');
       });
       if (markers.length === 1) {
         map.setView([markers[0].lat, markers[0].lng], 12);

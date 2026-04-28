@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, SafeAreaView, ActivityIndicator, Alert,
+  View, Text, StyleSheet, TouchableOpacity, SafeAreaView, ActivityIndicator,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { FontAwesome } from '@expo/vector-icons';
@@ -14,6 +14,7 @@ export default function JoinScreen() {
   const [loading, setLoading] = useState(true);
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState('');
+  const [joinError, setJoinError] = useState('');
 
   useEffect(() => {
     async function lookup() {
@@ -83,7 +84,7 @@ export default function JoinScreen() {
       .eq('id', user.id)
       .single();
 
-    const { error: joinError } = await supabase.from('trip_members').insert({
+    const { error: insertError } = await supabase.from('trip_members').insert({
       trip_id: trip.id,
       user_id: user.id,
       display_name: profile?.full_name ?? 'Traveler',
@@ -92,8 +93,8 @@ export default function JoinScreen() {
 
     setJoining(false);
 
-    if (joinError) {
-      Alert.alert('Could not join trip', joinError.message);
+    if (insertError) {
+      setJoinError('Could not join trip. Try again or ask the organizer to re-invite you.');
       return;
     }
 
@@ -160,6 +161,12 @@ export default function JoinScreen() {
           <Text style={styles.buttonText}>{joining ? 'Joining...' : 'Join trip'}</Text>
         </TouchableOpacity>
 
+        {!!joinError && (
+          <View style={styles.joinErrorBox}>
+            <Text style={styles.joinErrorText}>{joinError}</Text>
+          </View>
+        )}
+
         <TouchableOpacity onPress={() => router.replace('/(tabs)')} style={styles.skipButton}>
           <Text style={styles.skipText}>Maybe later</Text>
         </TouchableOpacity>
@@ -199,6 +206,12 @@ const styles = StyleSheet.create({
   skipButton: { padding: 8 },
   skipText: { color: Colors.textSecondary, fontSize: 15 },
 
+  joinErrorBox: {
+    backgroundColor: '#2a1010', borderRadius: 10,
+    borderWidth: 1, borderColor: '#5a1a1a',
+    padding: 12, width: '100%', marginBottom: 8,
+  },
+  joinErrorText: { fontSize: 13, color: '#ff6b6b', textAlign: 'center' },
   errorIcon: {
     width: 72, height: 72, borderRadius: 20,
     backgroundColor: Colors.primaryDim,
