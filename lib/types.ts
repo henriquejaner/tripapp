@@ -29,6 +29,7 @@ export interface Trip {
   people_count: number | null;
   parent_trip_id: string | null;
   split_note: string | null;
+  is_public: boolean;
   created_at: string;
 }
 

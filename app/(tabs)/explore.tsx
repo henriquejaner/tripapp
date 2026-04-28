@@ -1,0 +1,404 @@
+import { useState, useCallback, useRef } from 'react';
+import {
+  View, Text, StyleSheet, FlatList, TouchableOpacity,
+  SafeAreaView, TextInput, ScrollView, ActivityIndicator, Image,
+} from 'react-native';
+import { useFocusEffect, router } from 'expo-router';
+import { FontAwesome } from '@expo/vector-icons';
+import { supabase } from '@/lib/supabase';
+import { Colors } from '@/lib/colors';
+
+interface PublicTrip {
+  id: string;
+  name: string;
+  cover_image: string | null;
+  status: string;
+  stops: Array<{ destination: string; start_date: string | null; end_date: string | null }>;
+  member_count: number;
+}
+
+interface AISuggestion {
+  destination: string;
+  tagline: string;
+  vibe: string;
+  budget_per_day: number | null;
+}
+
+const VIBE_ICON: Record<string, string> = {
+  beach: 'sun-o', culture: 'institution', adventure: 'tree',
+  nightlife: 'glass', food: 'cutlery', nature: 'leaf', city: 'building-o',
+};
+
+function formatDateRange(stops: PublicTrip['stops']): string {
+  const first = stops[0];
+  const last = stops[stops.length - 1];
+  if (!first?.start_date) return '';
+  const opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
+  const start = new Date(first.start_date).toLocaleDateString('en', opts);
+  if (last?.end_date && last.end_date !== first.start_date) {
+    return `${start} – ${new Date(last.end_date).toLocaleDateString('en', opts)}`;
+  }
+  return start;
+}
+
+export default function DiscoverScreen() {
+  const [search, setSearch] = useState('');
+  const [publicTrips, setPublicTrips] = useState<PublicTrip[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [aiSuggestions, setAiSuggestions] = useState<AISuggestion[]>([]);
+  const [aiLoading, setAiLoading] = useState(false);
+  const aiLoaded = useRef(false);
+
+  useFocusEffect(useCallback(() => {
+    fetchPublicTrips();
+    if (!aiLoaded.current) {
+      aiLoaded.current = true;
+      generateAISuggestions();
+    }
+  }, []));
+
+  async function fetchPublicTrips() {
+    setLoading(true);
+    const { data: trips } = await supabase
+      .from('trips')
+      .select('id, name, cover_image, status, created_at')
+      .eq('is_public', true)
+      .is('parent_trip_id', null)
+      .order('created_at', { ascending: false });
+
+    if (!trips?.length) { setPublicTrips([]); setLoading(false); return; }
+
+    const tripIds = trips.map(t => t.id);
+    const [stopsRes, membersRes] = await Promise.all([
+      supabase.from('trip_stops').select('trip_id, destination, start_date, end_date, order_index').in('trip_id', tripIds).order('order_index'),
+      supabase.from('trip_members').select('trip_id').in('trip_id', tripIds),
+    ]);
+
+    const stopsByTrip: Record<string, PublicTrip['stops']> = {};
+    stopsRes.data?.forEach(s => {
+      if (!stopsByTrip[s.trip_id]) stopsByTrip[s.trip_id] = [];
+      stopsByTrip[s.trip_id].push(s);
+    });
+
+    const memberCount: Record<string, number> = {};
+    membersRes.data?.forEach(m => { memberCount[m.trip_id] = (memberCount[m.trip_id] ?? 0) + 1; });
+
+    setPublicTrips(trips.map(t => ({
+      ...t,
+      stops: stopsByTrip[t.id] ?? [],
+      member_count: memberCount[t.id] ?? 0,
+    })));
+    setLoading(false);
+  }
+
+  async function generateAISuggestions() {
+    const apiKey = process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY;
+    if (!apiKey) return;
+    setAiLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      let vibe = 'mixed'; let budget = 'mid-range';
+      if (user) {
+        const { data: profile } = await supabase
+          .from('profiles').select('travel_vibe, budget_range').eq('id', user.id).single();
+        if (profile?.travel_vibe?.length) vibe = Array.isArray(profile.travel_vibe) ? profile.travel_vibe.join(', ') : profile.travel_vibe;
+        if (profile?.budget_range?.length) budget = Array.isArray(profile.budget_range) ? profile.budget_range.join(', ') : profile.budget_range;
+      }
+
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 600,
+          messages: [{
+            role: 'user',
+            content: `Suggest 4 travel destinations for someone who enjoys ${vibe} travel on a ${budget} budget. Be specific, inspiring, and varied in geography.
+
+Return ONLY a valid raw JSON array (no markdown, no code blocks):
+[{"destination":"City, Country","tagline":"One compelling sentence about why to go","vibe":"beach|culture|adventure|nightlife|food|nature|city","budget_per_day":80}]`,
+          }],
+        }),
+      });
+      const data = await res.json();
+      const text = data.content?.[0]?.text ?? '[]';
+      const clean = text.trim().replace(/^```json?\n?/, '').replace(/\n?```$/, '');
+      setAiSuggestions(JSON.parse(clean));
+    } catch {}
+    setAiLoading(false);
+  }
+
+  const filtered = search.trim()
+    ? publicTrips.filter(t =>
+        t.name.toLowerCase().includes(search.toLowerCase()) ||
+        t.stops.some(s => s.destination.toLowerCase().includes(search.toLowerCase()))
+      )
+    : publicTrips;
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Discover</Text>
+        <Text style={styles.headerSub}>Get inspired by other travelers</Text>
+      </View>
+
+      <View style={styles.searchBox}>
+        <FontAwesome name="search" size={13} color={Colors.textMuted} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search destinations..."
+          placeholderTextColor={Colors.textMuted}
+          value={search}
+          onChangeText={setSearch}
+          returnKeyType="search"
+        />
+        {!!search && (
+          <TouchableOpacity onPress={() => setSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <FontAwesome name="times-circle" size={14} color={Colors.textMuted} />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      <FlatList
+        data={filtered}
+        keyExtractor={t => t.id}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.list}
+        ListHeaderComponent={
+          !search ? (
+            <>
+              {/* AI For You */}
+              <View style={styles.sectionRow}>
+                <FontAwesome name="magic" size={12} color={Colors.primary} />
+                <Text style={styles.sectionTitle}>For you</Text>
+              </View>
+              {aiLoading ? (
+                <View style={styles.aiLoadingRow}>
+                  <ActivityIndicator size="small" color={Colors.primary} />
+                  <Text style={styles.aiLoadingText}>Finding destinations for you...</Text>
+                </View>
+              ) : (
+                <ScrollView
+                  horizontal showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.aiScroll}
+                >
+                  {aiSuggestions.map((s, i) => (
+                    <TouchableOpacity
+                      key={i}
+                      style={styles.aiCard}
+                      onPress={() => setSearch(s.destination.split(',')[0].trim())}
+                      activeOpacity={0.82}
+                    >
+                      <View style={styles.aiCardIconWrap}>
+                        <FontAwesome
+                          name={(VIBE_ICON[s.vibe] ?? 'map-marker') as any}
+                          size={17} color={Colors.primary}
+                        />
+                      </View>
+                      <Text style={styles.aiCardDest} numberOfLines={1}>{s.destination}</Text>
+                      <Text style={styles.aiCardTagline} numberOfLines={3}>{s.tagline}</Text>
+                      {s.budget_per_day != null && (
+                        <Text style={styles.aiCardBudget}>~€{s.budget_per_day}/day</Text>
+                      )}
+                      <View style={styles.aiCardSearchBtn}>
+                        <FontAwesome name="search" size={10} color={Colors.primary} />
+                        <Text style={styles.aiCardSearchText}>Find trips</Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                  {!aiLoading && aiSuggestions.length === 0 && (
+                    <View style={styles.aiEmpty}>
+                      <Text style={styles.aiEmptyText}>Complete your profile to get personalized picks.</Text>
+                    </View>
+                  )}
+                </ScrollView>
+              )}
+
+              <View style={styles.sectionRow}>
+                <FontAwesome name="globe" size={12} color={Colors.textSecondary} />
+                <Text style={styles.sectionTitle}>Public trips</Text>
+                {publicTrips.length > 0 && (
+                  <View style={styles.sectionBadge}>
+                    <Text style={styles.sectionBadgeText}>{publicTrips.length}</Text>
+                  </View>
+                )}
+              </View>
+            </>
+          ) : (
+            <Text style={styles.resultLabel}>
+              {filtered.length} {filtered.length === 1 ? 'trip' : 'trips'} matching "{search}"
+            </Text>
+          )
+        }
+        ListEmptyComponent={!loading ? (
+          <View style={styles.empty}>
+            <View style={styles.emptyIcon}>
+              <FontAwesome name={search ? 'search' : 'globe'} size={22} color={Colors.primary} />
+            </View>
+            <Text style={styles.emptyTitle}>{search ? 'No trips found' : 'No public trips yet'}</Text>
+            <Text style={styles.emptySub}>
+              {search
+                ? 'Try a different destination or clear the search.'
+                : 'Be the first! Open any trip → Edit → toggle "Share publicly".'}
+            </Text>
+          </View>
+        ) : <ActivityIndicator color={Colors.primary} style={{ marginTop: 40 }} />}
+        renderItem={({ item }) => <PublicTripCard trip={item} />}
+      />
+    </SafeAreaView>
+  );
+}
+
+function PublicTripCard({ trip }: { trip: PublicTrip }) {
+  const dateLabel = formatDateRange(trip.stops);
+  return (
+    <TouchableOpacity
+      style={styles.card}
+      onPress={() => router.push(`/public-trip/${trip.id}`)}
+      activeOpacity={0.8}
+    >
+      {trip.cover_image ? (
+        <View>
+          <Image source={{ uri: trip.cover_image }} style={styles.cardCover} resizeMode="cover" />
+          <View style={styles.cardCoverOverlay} />
+          <Text style={styles.cardTitleOnCover} numberOfLines={1}>{trip.name}</Text>
+        </View>
+      ) : (
+        <View style={styles.cardTop}>
+          <Text style={styles.cardTitle} numberOfLines={1}>{trip.name}</Text>
+          <FontAwesome name="angle-right" size={16} color={Colors.textMuted} />
+        </View>
+      )}
+      <View style={styles.cardBody}>
+        {trip.stops.length > 0 && (
+          <Text style={styles.cardDests} numberOfLines={1}>
+            {trip.stops.map(s => s.destination).join(' → ')}
+          </Text>
+        )}
+        <View style={styles.cardMetaRow}>
+          {dateLabel ? (
+            <View style={styles.metaPill}>
+              <FontAwesome name="calendar-o" size={10} color={Colors.textMuted} />
+              <Text style={styles.metaText}>{dateLabel}</Text>
+            </View>
+          ) : null}
+          <View style={styles.metaPill}>
+            <FontAwesome name="users" size={10} color={Colors.textMuted} />
+            <Text style={styles.metaText}>{trip.member_count} {trip.member_count === 1 ? 'person' : 'people'}</Text>
+          </View>
+          <View style={[styles.metaPill, styles.metaPillAccent]}>
+            <Text style={styles.metaTextAccent}>View trip</Text>
+          </View>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: Colors.background },
+
+  header: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12 },
+  headerTitle: { fontSize: 26, fontWeight: '800', color: Colors.text, letterSpacing: -0.8 },
+  headerSub: { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
+
+  searchBox: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    marginHorizontal: 16, marginBottom: 16,
+    backgroundColor: Colors.card,
+    borderRadius: 12, borderWidth: 1, borderColor: Colors.border,
+    paddingHorizontal: 14, paddingVertical: 11,
+  },
+  searchInput: { flex: 1, fontSize: 14, color: Colors.text },
+
+  list: { paddingHorizontal: 16, paddingBottom: 40 },
+
+  sectionRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 12, marginTop: 4 },
+  sectionTitle: { fontSize: 15, fontWeight: '700', color: Colors.text, flex: 1 },
+  sectionBadge: {
+    backgroundColor: Colors.backgroundAlt, borderRadius: 10,
+    paddingHorizontal: 7, paddingVertical: 2,
+  },
+  sectionBadgeText: { fontSize: 11, fontWeight: '700', color: Colors.textSecondary },
+
+  resultLabel: { fontSize: 13, color: Colors.textSecondary, marginBottom: 12 },
+
+  // AI section
+  aiLoadingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 20, paddingLeft: 4 },
+  aiLoadingText: { fontSize: 13, color: Colors.textSecondary },
+  aiScroll: { paddingBottom: 20, gap: 10 },
+  aiCard: {
+    width: 160, backgroundColor: Colors.card,
+    borderRadius: 14, borderWidth: 1, borderColor: Colors.border,
+    padding: 14, gap: 6,
+  },
+  aiCardIconWrap: {
+    width: 36, height: 36, borderRadius: 10,
+    backgroundColor: Colors.primaryDim,
+    alignItems: 'center', justifyContent: 'center', marginBottom: 2,
+  },
+  aiCardDest: { fontSize: 13, fontWeight: '700', color: Colors.text, letterSpacing: -0.2 },
+  aiCardTagline: { fontSize: 11, color: Colors.textSecondary, lineHeight: 16, flex: 1 },
+  aiCardBudget: { fontSize: 11, fontWeight: '700', color: Colors.primary, marginTop: 2 },
+  aiCardSearchBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    marginTop: 4, paddingTop: 8,
+    borderTopWidth: 1, borderTopColor: Colors.border,
+  },
+  aiCardSearchText: { fontSize: 11, fontWeight: '600', color: Colors.primary },
+  aiEmpty: {
+    width: 200, backgroundColor: Colors.card,
+    borderRadius: 14, borderWidth: 1, borderColor: Colors.border,
+    padding: 16, justifyContent: 'center',
+  },
+  aiEmptyText: { fontSize: 12, color: Colors.textMuted, lineHeight: 18 },
+
+  // Trip cards
+  card: {
+    backgroundColor: Colors.card, borderRadius: 14,
+    borderWidth: 1, borderColor: Colors.border,
+    marginBottom: 10, overflow: 'hidden',
+  },
+  cardCover: { width: '100%', height: 120 },
+  cardCoverOverlay: {
+    position: 'absolute', top: 0, left: 0, right: 0, height: 120,
+    backgroundColor: 'rgba(0,0,0,0.28)',
+  },
+  cardTitleOnCover: {
+    position: 'absolute', bottom: 10, left: 14, right: 14,
+    fontSize: 16, fontWeight: '700', color: '#fff',
+    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4,
+  },
+  cardTop: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    padding: 14, paddingBottom: 0,
+  },
+  cardTitle: { fontSize: 16, fontWeight: '700', color: Colors.text, flex: 1 },
+  cardBody: { padding: 14, paddingTop: 8, gap: 8 },
+  cardDests: { fontSize: 13, color: Colors.textSecondary },
+  cardMetaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  metaPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: Colors.backgroundAlt, borderRadius: 20,
+    paddingHorizontal: 8, paddingVertical: 4,
+  },
+  metaPillAccent: { backgroundColor: Colors.primaryDim, marginLeft: 'auto' as any },
+  metaText: { fontSize: 11, color: Colors.textMuted, fontWeight: '500' },
+  metaTextAccent: { fontSize: 11, color: Colors.primary, fontWeight: '700' },
+
+  // Empty
+  empty: { alignItems: 'center', paddingTop: 48, paddingHorizontal: 32, gap: 12 },
+  emptyIcon: {
+    width: 60, height: 60, borderRadius: 18,
+    backgroundColor: Colors.primaryDim,
+    alignItems: 'center', justifyContent: 'center', marginBottom: 4,
+  },
+  emptyTitle: { fontSize: 17, fontWeight: '700', color: Colors.text },
+  emptySub: { fontSize: 13, color: Colors.textSecondary, textAlign: 'center', lineHeight: 20 },
+});

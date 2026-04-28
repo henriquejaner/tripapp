@@ -2728,6 +2728,7 @@ function EditTripModal({ visible, trip, initialStops, currentMembers, onClose, o
   const [name, setName] = useState(trip.name);
   const [peopleCount, setPeopleCount] = useState<string>(trip.people_count ? String(trip.people_count) : '');
   const [status, setStatus] = useState(trip.status);
+  const [isPublic, setIsPublic] = useState(trip.is_public ?? false);
   const [editStops, setEditStops] = useState<EditStop[]>([]);
   const [calendarFor, setCalendarFor] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
@@ -2743,6 +2744,7 @@ function EditTripModal({ visible, trip, initialStops, currentMembers, onClose, o
       setName(trip.name);
       setPeopleCount(trip.people_count ? String(trip.people_count) : '');
       setStatus(trip.status);
+      setIsPublic(trip.is_public ?? false);
       setEditStops(
         initialStops.length
           ? initialStops.map(s => ({ id: s.id, destination: s.destination, start_date: s.start_date, end_date: s.end_date }))
@@ -2793,7 +2795,7 @@ function EditTripModal({ visible, trip, initialStops, currentMembers, onClose, o
     // Update trip record
     const { data: updatedTrip, error } = await supabase
       .from('trips')
-      .update({ name: name.trim(), people_count: finalPeopleCount, status })
+      .update({ name: name.trim(), people_count: finalPeopleCount, status, is_public: isPublic })
       .eq('id', trip.id).select().single();
 
     if (error || !updatedTrip) { setSaving(false); return; }
@@ -2960,6 +2962,22 @@ function EditTripModal({ visible, trip, initialStops, currentMembers, onClose, o
                 </TouchableOpacity>
               ))}
             </View>
+
+            {!isSplit && (
+              <TouchableOpacity
+                style={styles.publicToggleRow}
+                onPress={() => setIsPublic(v => !v)}
+                activeOpacity={0.7}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.editLabel}>Visible on Discover</Text>
+                  <Text style={styles.publicToggleHint}>Let other travellers find and copy this trip</Text>
+                </View>
+                <View style={[styles.toggleTrack, isPublic && styles.toggleTrackOn]}>
+                  <View style={[styles.toggleThumb, isPublic && styles.toggleThumbOn]} />
+                </View>
+              </TouchableOpacity>
+            )}
 
             <Text style={styles.editLabel}>Stops</Text>
             {editStops.map((stop, i) => (
@@ -3400,6 +3418,22 @@ const styles = StyleSheet.create({
   statusChipActive: { backgroundColor: Colors.text, borderColor: Colors.text },
   statusChipText: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },
   statusChipTextActive: { color: Colors.white },
+
+  publicToggleRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: Colors.card, borderRadius: 12, padding: 14,
+    borderWidth: 1, borderColor: Colors.border, marginBottom: 4,
+  },
+  publicToggleHint: { fontSize: 12, color: Colors.textMuted, marginTop: 2 },
+  toggleTrack: {
+    width: 44, height: 26, borderRadius: 13,
+    backgroundColor: Colors.border, justifyContent: 'center', padding: 2,
+  },
+  toggleTrackOn: { backgroundColor: Colors.primary },
+  toggleThumb: {
+    width: 22, height: 22, borderRadius: 11, backgroundColor: Colors.white,
+  },
+  toggleThumbOn: { alignSelf: 'flex-end' },
 
   // Invite
   inviteSheet: { flex: 1, backgroundColor: Colors.background },

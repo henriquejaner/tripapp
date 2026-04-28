@@ -66,6 +66,7 @@ export default function RootLayout() {
         <Stack.Screen name="trip/[id]" />
         <Stack.Screen name="join/[code]" />
         <Stack.Screen name="notifications" />
+        <Stack.Screen name="public-trip/[id]" />
       </Stack>
     </>
   );
