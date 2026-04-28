@@ -31,19 +31,30 @@ interface WeekendDest {
   flightHours: string;
   budgetPerDay: number;
   vibe: string;
+  photo: string;
 }
 
 const WEEKEND_PICKS: WeekendDest[] = [
-  { destination: 'Lisbon', country: 'Portugal', flightHours: '1h 30m', budgetPerDay: 75, vibe: 'culture' },
-  { destination: 'Porto', country: 'Portugal', flightHours: '1h 20m', budgetPerDay: 65, vibe: 'food' },
-  { destination: 'Barcelona', country: 'Spain', flightHours: '1h 05m', budgetPerDay: 90, vibe: 'beach' },
-  { destination: 'Paris', country: 'France', flightHours: '2h 05m', budgetPerDay: 120, vibe: 'culture' },
-  { destination: 'Marrakech', country: 'Morocco', flightHours: '2h 50m', budgetPerDay: 50, vibe: 'adventure' },
-  { destination: 'Rome', country: 'Italy', flightHours: '2h 20m', budgetPerDay: 95, vibe: 'culture' },
-  { destination: 'Amsterdam', country: 'Netherlands', flightHours: '2h 40m', budgetPerDay: 100, vibe: 'city' },
-  { destination: 'Prague', country: 'Czech Republic', flightHours: '2h 50m', budgetPerDay: 65, vibe: 'nightlife' },
-  { destination: 'Budapest', country: 'Hungary', flightHours: '3h 00m', budgetPerDay: 60, vibe: 'nightlife' },
-  { destination: 'Copenhagen', country: 'Denmark', flightHours: '3h 10m', budgetPerDay: 130, vibe: 'city' },
+  { destination: 'Lisbon', country: 'Portugal', flightHours: '1h 30m', budgetPerDay: 75, vibe: 'culture',
+    photo: 'https://images.unsplash.com/photo-1555881400-74d7acaacd8b?w=400&h=220&fit=crop&q=80' },
+  { destination: 'Porto', country: 'Portugal', flightHours: '1h 20m', budgetPerDay: 65, vibe: 'food',
+    photo: 'https://images.unsplash.com/photo-1555993539-1732b0258235?w=400&h=220&fit=crop&q=80' },
+  { destination: 'Barcelona', country: 'Spain', flightHours: '1h 05m', budgetPerDay: 90, vibe: 'beach',
+    photo: 'https://images.unsplash.com/photo-1539037116277-4db20889f2d4?w=400&h=220&fit=crop&q=80' },
+  { destination: 'Paris', country: 'France', flightHours: '2h 05m', budgetPerDay: 120, vibe: 'culture',
+    photo: 'https://images.unsplash.com/photo-1502602898657-3e91760cbb34?w=400&h=220&fit=crop&q=80' },
+  { destination: 'Marrakech', country: 'Morocco', flightHours: '2h 50m', budgetPerDay: 50, vibe: 'adventure',
+    photo: 'https://images.unsplash.com/photo-1597212618440-806262de1f04?w=400&h=220&fit=crop&q=80' },
+  { destination: 'Rome', country: 'Italy', flightHours: '2h 20m', budgetPerDay: 95, vibe: 'culture',
+    photo: 'https://images.unsplash.com/photo-1552832230-c0197dd311b5?w=400&h=220&fit=crop&q=80' },
+  { destination: 'Amsterdam', country: 'Netherlands', flightHours: '2h 40m', budgetPerDay: 100, vibe: 'city',
+    photo: 'https://images.unsplash.com/photo-1534351590666-13e3e96b5017?w=400&h=220&fit=crop&q=80' },
+  { destination: 'Prague', country: 'Czech Republic', flightHours: '2h 50m', budgetPerDay: 65, vibe: 'nightlife',
+    photo: 'https://images.unsplash.com/photo-1541849546-216549ae216d?w=400&h=220&fit=crop&q=80' },
+  { destination: 'Budapest', country: 'Hungary', flightHours: '3h 00m', budgetPerDay: 60, vibe: 'nightlife',
+    photo: 'https://images.unsplash.com/photo-1541350781664-0f5d8ba7abb5?w=400&h=220&fit=crop&q=80' },
+  { destination: 'Copenhagen', country: 'Denmark', flightHours: '3h 10m', budgetPerDay: 130, vibe: 'city',
+    photo: 'https://images.unsplash.com/photo-1513622470522-26c3c8a854bc?w=400&h=220&fit=crop&q=80' },
 ];
 
 const VIBE_ICON: Record<string, string> = {
@@ -312,23 +323,28 @@ Return ONLY a valid raw JSON array (no markdown, no code blocks):
                       key={d.destination}
                       style={styles.weekendCard}
                       onPress={() => setSearch(d.destination)}
-                      activeOpacity={0.82}
+                      activeOpacity={0.85}
                     >
-                      <View style={[styles.weekendAccent, { backgroundColor: color }]} />
-                      <View style={styles.weekendBody}>
-                        <View style={[styles.weekendIconWrap, { backgroundColor: color + '22' }]}>
-                          <FontAwesome name={(VIBE_ICON[d.vibe] ?? 'map-marker') as any} size={15} color={color} />
+                      <View style={styles.weekendImageWrap}>
+                        <Image source={{ uri: d.photo }} style={styles.weekendImage} resizeMode="cover" />
+                        <View style={styles.weekendImageOverlay} />
+                        <View style={[styles.weekendVibePill, { backgroundColor: color }]}>
+                          <FontAwesome name={(VIBE_ICON[d.vibe] ?? 'map-marker') as any} size={9} color="#fff" />
                         </View>
+                        {tripCount > 0 && (
+                          <View style={styles.weekendTripBadge}>
+                            <Text style={styles.weekendTripBadgeText}>{tripCount} trip{tripCount !== 1 ? 's' : ''}</Text>
+                          </View>
+                        )}
+                      </View>
+                      <View style={styles.weekendBody}>
                         <Text style={styles.weekendCity}>{d.destination}</Text>
                         <Text style={styles.weekendCountry}>{d.country}</Text>
                         <View style={styles.weekendMeta}>
-                          <FontAwesome name="clock-o" size={10} color={Colors.textMuted} />
+                          <FontAwesome name="clock-o" size={9} color={Colors.textMuted} />
                           <Text style={styles.weekendMetaText}>{d.flightHours}</Text>
                         </View>
-                        <Text style={styles.weekendBudget}>~€{d.budgetPerDay}/day</Text>
-                        {tripCount > 0 && (
-                          <Text style={styles.weekendTripCount}>{tripCount} trip{tripCount !== 1 ? 's' : ''} here</Text>
-                        )}
+                        <Text style={[styles.weekendBudget, { color }]}>~€{d.budgetPerDay}/day</Text>
                       </View>
                     </TouchableOpacity>
                   );
@@ -497,22 +513,33 @@ const styles = StyleSheet.create({
   // Weekend from Madrid
   weekendScroll: { gap: 10, paddingBottom: 20 },
   weekendCard: {
-    width: 130, backgroundColor: Colors.card,
+    width: 145, backgroundColor: Colors.card,
     borderRadius: 14, borderWidth: 1, borderColor: Colors.border,
     overflow: 'hidden',
   },
-  weekendAccent: { height: 4, width: '100%' },
-  weekendBody: { padding: 12, gap: 4 },
-  weekendIconWrap: {
-    width: 32, height: 32, borderRadius: 9,
-    alignItems: 'center', justifyContent: 'center', marginBottom: 4,
+  weekendImageWrap: { width: '100%', height: 100, position: 'relative' },
+  weekendImage: { width: '100%', height: 100 },
+  weekendImageOverlay: {
+    position: 'absolute', inset: 0,
+    backgroundColor: 'rgba(0,0,0,0.18)',
   },
-  weekendCity: { fontSize: 14, fontWeight: '700', color: Colors.text, letterSpacing: -0.3 },
-  weekendCountry: { fontSize: 11, color: Colors.textMuted },
-  weekendMeta: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 },
-  weekendMetaText: { fontSize: 11, color: Colors.textMuted },
-  weekendBudget: { fontSize: 12, fontWeight: '700', color: Colors.primary, marginTop: 2 },
-  weekendTripCount: { fontSize: 10, color: Colors.textSecondary, marginTop: 4 },
+  weekendVibePill: {
+    position: 'absolute', top: 8, left: 8,
+    width: 22, height: 22, borderRadius: 7,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  weekendTripBadge: {
+    position: 'absolute', top: 8, right: 8,
+    backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 8,
+    paddingHorizontal: 6, paddingVertical: 2,
+  },
+  weekendTripBadgeText: { fontSize: 9, fontWeight: '700', color: '#fff' },
+  weekendBody: { padding: 10, gap: 2 },
+  weekendCity: { fontSize: 13, fontWeight: '700', color: Colors.text, letterSpacing: -0.3 },
+  weekendCountry: { fontSize: 10, color: Colors.textMuted },
+  weekendMeta: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5 },
+  weekendMetaText: { fontSize: 10, color: Colors.textMuted },
+  weekendBudget: { fontSize: 11, fontWeight: '700', marginTop: 1 },
 
   // Trip cards
   card: {
