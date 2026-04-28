@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useMemo } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   SafeAreaView, TextInput, ScrollView, ActivityIndicator, Image,
@@ -13,6 +13,7 @@ interface PublicTrip {
   name: string;
   cover_image: string | null;
   status: string;
+  created_at: string;
   stops: Array<{ destination: string; start_date: string | null; end_date: string | null }>;
   member_count: number;
 }
@@ -24,9 +25,35 @@ interface AISuggestion {
   budget_per_day: number | null;
 }
 
+interface WeekendDest {
+  destination: string;
+  country: string;
+  flightHours: string;
+  budgetPerDay: number;
+  vibe: string;
+}
+
+const WEEKEND_PICKS: WeekendDest[] = [
+  { destination: 'Lisbon', country: 'Portugal', flightHours: '1h 30m', budgetPerDay: 75, vibe: 'culture' },
+  { destination: 'Porto', country: 'Portugal', flightHours: '1h 20m', budgetPerDay: 65, vibe: 'food' },
+  { destination: 'Barcelona', country: 'Spain', flightHours: '1h 05m', budgetPerDay: 90, vibe: 'beach' },
+  { destination: 'Paris', country: 'France', flightHours: '2h 05m', budgetPerDay: 120, vibe: 'culture' },
+  { destination: 'Marrakech', country: 'Morocco', flightHours: '2h 50m', budgetPerDay: 50, vibe: 'adventure' },
+  { destination: 'Rome', country: 'Italy', flightHours: '2h 20m', budgetPerDay: 95, vibe: 'culture' },
+  { destination: 'Amsterdam', country: 'Netherlands', flightHours: '2h 40m', budgetPerDay: 100, vibe: 'city' },
+  { destination: 'Prague', country: 'Czech Republic', flightHours: '2h 50m', budgetPerDay: 65, vibe: 'nightlife' },
+  { destination: 'Budapest', country: 'Hungary', flightHours: '3h 00m', budgetPerDay: 60, vibe: 'nightlife' },
+  { destination: 'Copenhagen', country: 'Denmark', flightHours: '3h 10m', budgetPerDay: 130, vibe: 'city' },
+];
+
 const VIBE_ICON: Record<string, string> = {
   beach: 'sun-o', culture: 'institution', adventure: 'tree',
   nightlife: 'glass', food: 'cutlery', nature: 'leaf', city: 'building-o',
+};
+
+const VIBE_COLOR: Record<string, string> = {
+  beach: '#38B2E8', culture: '#00A87A', adventure: '#E85438',
+  nightlife: '#A855F7', food: '#E8A838', nature: '#22C55E', city: '#6B7280',
 };
 
 function formatDateRange(stops: PublicTrip['stops']): string {
@@ -39,6 +66,10 @@ function formatDateRange(stops: PublicTrip['stops']): string {
     return `${start} – ${new Date(last.end_date).toLocaleDateString('en', opts)}`;
   }
   return start;
+}
+
+function isRecent(createdAt: string): boolean {
+  return Date.now() - new Date(createdAt).getTime() < 7 * 24 * 60 * 60 * 1000;
 }
 
 export default function DiscoverScreen() {
@@ -133,6 +164,21 @@ Return ONLY a valid raw JSON array (no markdown, no code blocks):
     setAiLoading(false);
   }
 
+  // Aggregate destinations from public trips, sorted by frequency
+  const trendingDests = useMemo(() => {
+    const counts: Record<string, number> = {};
+    publicTrips.forEach(t => {
+      t.stops.forEach(s => {
+        const key = s.destination.trim();
+        counts[key] = (counts[key] ?? 0) + 1;
+      });
+    });
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 12)
+      .map(([destination, count]) => ({ destination, count }));
+  }, [publicTrips]);
+
   const filtered = search.trim()
     ? publicTrips.filter(t =>
         t.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -194,10 +240,10 @@ Return ONLY a valid raw JSON array (no markdown, no code blocks):
                       onPress={() => setSearch(s.destination.split(',')[0].trim())}
                       activeOpacity={0.82}
                     >
-                      <View style={styles.aiCardIconWrap}>
+                      <View style={[styles.aiCardIconWrap, { backgroundColor: (VIBE_COLOR[s.vibe] ?? Colors.primary) + '22' }]}>
                         <FontAwesome
                           name={(VIBE_ICON[s.vibe] ?? 'map-marker') as any}
-                          size={17} color={Colors.primary}
+                          size={17} color={VIBE_COLOR[s.vibe] ?? Colors.primary}
                         />
                       </View>
                       <Text style={styles.aiCardDest} numberOfLines={1}>{s.destination}</Text>
@@ -219,6 +265,77 @@ Return ONLY a valid raw JSON array (no markdown, no code blocks):
                 </ScrollView>
               )}
 
+              {/* Trending destinations */}
+              {trendingDests.length > 0 && (
+                <>
+                  <View style={styles.sectionRow}>
+                    <FontAwesome name="fire" size={12} color="#E85438" />
+                    <Text style={styles.sectionTitle}>Trending</Text>
+                  </View>
+                  <ScrollView
+                    horizontal showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.trendScroll}
+                  >
+                    {trendingDests.map(d => (
+                      <TouchableOpacity
+                        key={d.destination}
+                        style={styles.trendChip}
+                        onPress={() => setSearch(d.destination)}
+                        activeOpacity={0.75}
+                      >
+                        <Text style={styles.trendChipName}>{d.destination}</Text>
+                        <View style={styles.trendChipBadge}>
+                          <Text style={styles.trendChipCount}>{d.count}</Text>
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </>
+              )}
+
+              {/* Weekend from Madrid */}
+              <View style={styles.sectionRow}>
+                <FontAwesome name="plane" size={12} color={Colors.textSecondary} />
+                <Text style={styles.sectionTitle}>Weekend from Madrid</Text>
+              </View>
+              <ScrollView
+                horizontal showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.weekendScroll}
+              >
+                {WEEKEND_PICKS.map(d => {
+                  const color = VIBE_COLOR[d.vibe] ?? Colors.primary;
+                  const tripCount = trendingDests.find(t =>
+                    t.destination.toLowerCase().includes(d.destination.toLowerCase())
+                  )?.count ?? 0;
+                  return (
+                    <TouchableOpacity
+                      key={d.destination}
+                      style={styles.weekendCard}
+                      onPress={() => setSearch(d.destination)}
+                      activeOpacity={0.82}
+                    >
+                      <View style={[styles.weekendAccent, { backgroundColor: color }]} />
+                      <View style={styles.weekendBody}>
+                        <View style={[styles.weekendIconWrap, { backgroundColor: color + '22' }]}>
+                          <FontAwesome name={(VIBE_ICON[d.vibe] ?? 'map-marker') as any} size={15} color={color} />
+                        </View>
+                        <Text style={styles.weekendCity}>{d.destination}</Text>
+                        <Text style={styles.weekendCountry}>{d.country}</Text>
+                        <View style={styles.weekendMeta}>
+                          <FontAwesome name="clock-o" size={10} color={Colors.textMuted} />
+                          <Text style={styles.weekendMetaText}>{d.flightHours}</Text>
+                        </View>
+                        <Text style={styles.weekendBudget}>~€{d.budgetPerDay}/day</Text>
+                        {tripCount > 0 && (
+                          <Text style={styles.weekendTripCount}>{tripCount} trip{tripCount !== 1 ? 's' : ''} here</Text>
+                        )}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+
+              {/* Public trips header */}
               <View style={styles.sectionRow}>
                 <FontAwesome name="globe" size={12} color={Colors.textSecondary} />
                 <Text style={styles.sectionTitle}>Public trips</Text>
@@ -244,7 +361,7 @@ Return ONLY a valid raw JSON array (no markdown, no code blocks):
             <Text style={styles.emptySub}>
               {search
                 ? 'Try a different destination or clear the search.'
-                : 'Be the first! Open any trip → Edit → toggle "Share publicly".'}
+                : 'Be the first! Open any trip → Edit → toggle "Visible on Discover".'}
             </Text>
           </View>
         ) : <ActivityIndicator color={Colors.primary} style={{ marginTop: 40 }} />}
@@ -256,6 +373,7 @@ Return ONLY a valid raw JSON array (no markdown, no code blocks):
 
 function PublicTripCard({ trip }: { trip: PublicTrip }) {
   const dateLabel = formatDateRange(trip.stops);
+  const fresh = isRecent(trip.created_at);
   return (
     <TouchableOpacity
       style={styles.card}
@@ -266,12 +384,16 @@ function PublicTripCard({ trip }: { trip: PublicTrip }) {
         <View>
           <Image source={{ uri: trip.cover_image }} style={styles.cardCover} resizeMode="cover" />
           <View style={styles.cardCoverOverlay} />
+          {fresh && <View style={styles.newBadge}><Text style={styles.newBadgeText}>NEW</Text></View>}
           <Text style={styles.cardTitleOnCover} numberOfLines={1}>{trip.name}</Text>
         </View>
       ) : (
         <View style={styles.cardTop}>
           <Text style={styles.cardTitle} numberOfLines={1}>{trip.name}</Text>
-          <FontAwesome name="angle-right" size={16} color={Colors.textMuted} />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            {fresh && <View style={styles.newBadge}><Text style={styles.newBadgeText}>NEW</Text></View>}
+            <FontAwesome name="angle-right" size={16} color={Colors.textMuted} />
+          </View>
         </View>
       )}
       <View style={styles.cardBody}>
@@ -289,7 +411,7 @@ function PublicTripCard({ trip }: { trip: PublicTrip }) {
           ) : null}
           <View style={styles.metaPill}>
             <FontAwesome name="users" size={10} color={Colors.textMuted} />
-            <Text style={styles.metaText}>{trip.member_count} {trip.member_count === 1 ? 'person' : 'people'}</Text>
+            <Text style={styles.metaText}>{trip.member_count} {trip.member_count === 1 ? 'traveler' : 'travelers'}</Text>
           </View>
           <View style={[styles.metaPill, styles.metaPillAccent]}>
             <Text style={styles.metaTextAccent}>View trip</Text>
@@ -339,7 +461,6 @@ const styles = StyleSheet.create({
   },
   aiCardIconWrap: {
     width: 36, height: 36, borderRadius: 10,
-    backgroundColor: Colors.primaryDim,
     alignItems: 'center', justifyContent: 'center', marginBottom: 2,
   },
   aiCardDest: { fontSize: 13, fontWeight: '700', color: Colors.text, letterSpacing: -0.2 },
@@ -357,6 +478,41 @@ const styles = StyleSheet.create({
     padding: 16, justifyContent: 'center',
   },
   aiEmptyText: { fontSize: 12, color: Colors.textMuted, lineHeight: 18 },
+
+  // Trending
+  trendScroll: { gap: 8, paddingBottom: 20 },
+  trendChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: Colors.card, borderRadius: 20,
+    borderWidth: 1, borderColor: Colors.border,
+    paddingHorizontal: 12, paddingVertical: 7,
+  },
+  trendChipName: { fontSize: 13, fontWeight: '600', color: Colors.text },
+  trendChipBadge: {
+    backgroundColor: Colors.primaryDim, borderRadius: 10,
+    paddingHorizontal: 6, paddingVertical: 1,
+  },
+  trendChipCount: { fontSize: 10, fontWeight: '700', color: Colors.primary },
+
+  // Weekend from Madrid
+  weekendScroll: { gap: 10, paddingBottom: 20 },
+  weekendCard: {
+    width: 130, backgroundColor: Colors.card,
+    borderRadius: 14, borderWidth: 1, borderColor: Colors.border,
+    overflow: 'hidden',
+  },
+  weekendAccent: { height: 4, width: '100%' },
+  weekendBody: { padding: 12, gap: 4 },
+  weekendIconWrap: {
+    width: 32, height: 32, borderRadius: 9,
+    alignItems: 'center', justifyContent: 'center', marginBottom: 4,
+  },
+  weekendCity: { fontSize: 14, fontWeight: '700', color: Colors.text, letterSpacing: -0.3 },
+  weekendCountry: { fontSize: 11, color: Colors.textMuted },
+  weekendMeta: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 },
+  weekendMetaText: { fontSize: 11, color: Colors.textMuted },
+  weekendBudget: { fontSize: 12, fontWeight: '700', color: Colors.primary, marginTop: 2 },
+  weekendTripCount: { fontSize: 10, color: Colors.textSecondary, marginTop: 4 },
 
   // Trip cards
   card: {
@@ -391,6 +547,13 @@ const styles = StyleSheet.create({
   metaPillAccent: { backgroundColor: Colors.primaryDim, marginLeft: 'auto' as any },
   metaText: { fontSize: 11, color: Colors.textMuted, fontWeight: '500' },
   metaTextAccent: { fontSize: 11, color: Colors.primary, fontWeight: '700' },
+
+  newBadge: {
+    position: 'absolute', top: 10, right: 10,
+    backgroundColor: Colors.primary, borderRadius: 6,
+    paddingHorizontal: 6, paddingVertical: 2,
+  },
+  newBadgeText: { fontSize: 9, fontWeight: '800', color: '#fff', letterSpacing: 0.5 },
 
   // Empty
   empty: { alignItems: 'center', paddingTop: 48, paddingHorizontal: 32, gap: 12 },
