@@ -75,12 +75,23 @@ function WeekendCard({ dest, color, tripCount, onPress }: {
         'X-Goog-Api-Key': key,
         'X-Goog-FieldMask': 'places.photos',
       },
-      body: JSON.stringify({ textQuery: `${dest.destination} ${dest.country}`, pageSize: 1 }),
+      body: JSON.stringify({
+        textQuery: `${dest.destination} ${dest.country} landmark tourist attraction`,
+        pageSize: 1,
+        includedType: 'tourist_attraction',
+      }),
     })
       .then(r => r.json())
       .then(data => {
-        const name = data.places?.[0]?.photos?.[0]?.name;
-        if (name) setPhotoUri(`https://places.googleapis.com/v1/${name}/media?maxWidthPx=400&key=${key}`);
+        const photos: Array<{ name: string; widthPx: number; heightPx: number }> =
+          data.places?.[0]?.photos ?? [];
+        // Pick the most landscape-oriented photo (best for cards)
+        const best = photos
+          .slice(0, 10)
+          .sort((a, b) => (b.widthPx / b.heightPx) - (a.widthPx / a.heightPx))[0];
+        if (best?.name) {
+          setPhotoUri(`https://places.googleapis.com/v1/${best.name}/media?maxWidthPx=400&key=${key}`);
+        }
       })
       .catch(() => {});
   }, [dest.destination]);
