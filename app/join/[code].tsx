@@ -18,11 +18,11 @@ export default function JoinScreen() {
 
   useEffect(() => {
     async function lookup() {
-      const { data: tripData, error: tripError } = await supabase
-        .from('trips')
-        .select('*')
-        .eq('invite_code', code?.toUpperCase())
-        .single();
+      // Use RPC to bypass RLS — non-members can't read trips directly
+      const { data: rows, error: tripError } = await supabase
+        .rpc('get_trip_by_invite_code', { code: code?.toUpperCase() });
+
+      const tripData = rows?.[0];
 
       if (tripError || !tripData) {
         setError('This invite link is invalid or has expired.');
@@ -94,7 +94,7 @@ export default function JoinScreen() {
     setJoining(false);
 
     if (insertError) {
-      setJoinError('Could not join trip. Try again or ask the organizer to re-invite you.');
+      setJoinError(insertError.message ?? 'Could not join trip. Try again.');
       return;
     }
 

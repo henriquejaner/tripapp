@@ -9,16 +9,39 @@ import { supabase } from '@/lib/supabase';
 import { Colors } from '@/lib/colors';
 import type { AppNotification } from '@/lib/types';
 
-const TYPE_ICONS: Record<string, { icon: string; color: string }> = {
-  idea_added:     { icon: 'lightbulb-o', color: Colors.accent },
-  idea_confirmed: { icon: 'check-circle', color: Colors.green },
-  comment_added:  { icon: 'comment-o', color: Colors.primary },
-  member_joined:  { icon: 'user-plus', color: Colors.warning },
-  nudge_21:       { icon: 'calendar', color: Colors.accent },
-  nudge_7:        { icon: 'clock-o', color: Colors.warning },
-  nudge_3:        { icon: 'exclamation-circle', color: Colors.primary },
-  default:        { icon: 'bell', color: Colors.textMuted },
+const TYPE_CONFIG: Record<string, { icon: string; color: string; label: string }> = {
+  idea_added:     { icon: 'lightbulb-o', color: '#3D7EFF', label: 'New idea' },
+  idea_confirmed: { icon: 'check-circle', color: Colors.success, label: 'Confirmed' },
+  comment_added:  { icon: 'comment-o',   color: Colors.primary, label: 'Comment' },
+  member_joined:  { icon: 'user-plus',   color: '#A855F7', label: 'Joined' },
+  nudge_21:       { icon: 'calendar',    color: '#F5A623', label: 'Reminder' },
+  nudge_7:        { icon: 'clock-o',     color: '#F5A623', label: 'Reminder' },
+  nudge_3:        { icon: 'exclamation-circle', color: Colors.primary, label: 'Urgent' },
+  default:        { icon: 'bell',        color: Colors.textMuted, label: '' },
 };
+
+function groupByDate(notifications: AppNotification[]): Array<{ title: string; data: AppNotification[] }> {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const yesterday = today - 86400000;
+  const weekAgo = today - 7 * 86400000;
+
+  const groups: Record<string, AppNotification[]> = {
+    Today: [], Yesterday: [], 'This week': [], Earlier: [],
+  };
+
+  notifications.forEach(n => {
+    const t = new Date(n.created_at).getTime();
+    if (t >= today) groups['Today'].push(n);
+    else if (t >= yesterday) groups['Yesterday'].push(n);
+    else if (t >= weekAgo) groups['This week'].push(n);
+    else groups['Earlier'].push(n);
+  });
+
+  return Object.entries(groups)
+    .filter(([, items]) => items.length > 0)
+    .map(([title, data]) => ({ title, data }));
+}
 
 export default function NotificationsScreen() {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
@@ -33,19 +56,11 @@ export default function NotificationsScreen() {
       .select('*')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
-      .limit(50);
+      .limit(60);
     setNotifications(data ?? []);
     setLoading(false);
-
-    // Mark all as read on open
-    await supabase.from('notifications').update({ read: true }).eq('user_id', user.id).eq('read', false);
-  }
-
-  async function markAllRead() {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    await supabase.from('notifications').update({ read: true }).eq('user_id', user.id);
-    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    // Mark all as read
+    supabase.from('notifications').update({ read: true }).eq('user_id', user.id).eq('read', false);
   }
 
   useEffect(() => { load(); }, []);
@@ -57,41 +72,57 @@ export default function NotificationsScreen() {
   }, []);
 
   const unreadCount = notifications.filter(n => !n.read).length;
+  const groups = groupByDate(notifications);
+
+  // Flatten groups into FlatList items with section headers
+  type ListItem =
+    | { type: 'header'; title: string; key: string }
+    | { type: 'notification'; data: AppNotification; key: string };
+
+  const flatItems: ListItem[] = groups.flatMap(g => [
+    { type: 'header' as const, title: g.title, key: `h-${g.title}` },
+    ...g.data.map(n => ({ type: 'notification' as const, data: n, key: n.id })),
+  ]);
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           <FontAwesome name="angle-left" size={22} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Notifications</Text>
-        {unreadCount > 0 ? (
-          <TouchableOpacity onPress={markAllRead}>
-            <Text style={styles.markAllText}>Mark all read</Text>
-          </TouchableOpacity>
-        ) : (
-          <View style={{ width: 80 }} />
-        )}
+        <View>
+          <Text style={styles.headerTitle}>Notifications</Text>
+          {unreadCount > 0 && (
+            <Text style={styles.headerSub}>{unreadCount} unread</Text>
+          )}
+        </View>
+        <View style={{ width: 60 }} />
       </View>
 
       {loading ? (
         <ActivityIndicator color={Colors.primary} style={{ flex: 1 }} />
+      ) : notifications.length === 0 ? (
+        <EmptyState />
       ) : (
         <FlatList
-          data={notifications}
-          keyExtractor={n => n.id}
+          data={flatItems}
+          keyExtractor={item => item.key}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
-          ListEmptyComponent={<EmptyState />}
-          renderItem={({ item }) => (
-            <NotificationRow
-              notification={item}
-              onPress={() => {
-                if (item.trip_id) router.push(`/trip/${item.trip_id}`);
-              }}
-            />
-          )}
+          renderItem={({ item }) => {
+            if (item.type === 'header') {
+              return <Text style={styles.groupHeader}>{item.title}</Text>;
+            }
+            return (
+              <NotificationRow
+                notification={item.data}
+                onPress={() => {
+                  if (item.data.trip_id) router.push(`/trip/${item.data.trip_id}`);
+                }}
+              />
+            );
+          }}
         />
       )}
     </SafeAreaView>
@@ -101,7 +132,7 @@ export default function NotificationsScreen() {
 function NotificationRow({ notification, onPress }: {
   notification: AppNotification; onPress: () => void;
 }) {
-  const { icon, color } = TYPE_ICONS[notification.type] ?? TYPE_ICONS.default;
+  const config = TYPE_CONFIG[notification.type] ?? TYPE_CONFIG.default;
   const timeAgo = formatTimeAgo(notification.created_at);
 
   return (
@@ -110,15 +141,18 @@ function NotificationRow({ notification, onPress }: {
       onPress={onPress}
       activeOpacity={0.7}
     >
-      <View style={[styles.iconBox, { backgroundColor: color + '15' }]}>
-        <FontAwesome name={icon as any} size={16} color={color} />
+      <View style={[styles.iconBox, { backgroundColor: config.color + '18' }]}>
+        <FontAwesome name={config.icon as any} size={16} color={config.color} />
       </View>
       <View style={styles.rowContent}>
-        <Text style={[styles.rowTitle, !notification.read && styles.rowTitleUnread]}>
+        <Text style={[styles.rowMessage, !notification.read && styles.rowMessageUnread]} numberOfLines={2}>
           {notification.message}
         </Text>
         {notification.trip_name && (
-          <Text style={styles.rowBody} numberOfLines={1}>{notification.trip_name}</Text>
+          <View style={styles.tripNameRow}>
+            <FontAwesome name="map-marker" size={10} color={Colors.textMuted} />
+            <Text style={styles.tripNameText} numberOfLines={1}>{notification.trip_name}</Text>
+          </View>
         )}
         <Text style={styles.rowTime}>{timeAgo}</Text>
       </View>
@@ -130,10 +164,12 @@ function NotificationRow({ notification, onPress }: {
 function EmptyState() {
   return (
     <View style={styles.empty}>
-      <FontAwesome name="bell-o" size={40} color={Colors.border} />
-      <Text style={styles.emptyTitle}>You're all caught up</Text>
+      <View style={styles.emptyIcon}>
+        <FontAwesome name="bell-o" size={28} color={Colors.primary} />
+      </View>
+      <Text style={styles.emptyTitle}>All caught up</Text>
       <Text style={styles.emptyText}>
-        We'll notify you when ideas are added, confirmed, or when new members join your trips.
+        You'll get notified when someone joins your trip, adds an idea, or confirms a plan.
       </Text>
     </View>
   );
@@ -147,50 +183,58 @@ function formatTimeAgo(dateStr: string): string {
   const hours = Math.floor(mins / 60);
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+  if (days === 1) return 'yesterday';
+  if (days < 7) return `${days} days ago`;
+  return new Date(dateStr).toLocaleDateString('en', { month: 'short', day: 'numeric' });
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
+
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingVertical: 14,
     borderBottomWidth: 1, borderBottomColor: Colors.border,
   },
   backBtn: { padding: 4, width: 36 },
-  headerTitle: { fontSize: 16, fontWeight: '700', color: Colors.text },
-  markAllText: { fontSize: 13, color: Colors.primary, fontWeight: '600', width: 80, textAlign: 'right' },
+  headerTitle: { fontSize: 17, fontWeight: '700', color: Colors.text, textAlign: 'center' },
+  headerSub: { fontSize: 11, color: Colors.primary, fontWeight: '600', textAlign: 'center', marginTop: 1 },
 
-  list: { paddingVertical: 8, paddingBottom: 40 },
+  list: { paddingBottom: 40 },
+
+  groupHeader: {
+    fontSize: 11, fontWeight: '700', color: Colors.textMuted,
+    letterSpacing: 0.6, textTransform: 'uppercase',
+    paddingHorizontal: 16, paddingTop: 20, paddingBottom: 6,
+  },
 
   row: {
     flexDirection: 'row', alignItems: 'flex-start', gap: 14,
     paddingHorizontal: 16, paddingVertical: 14,
     borderBottomWidth: 1, borderBottomColor: Colors.border,
-    backgroundColor: Colors.background,
   },
   rowUnread: { backgroundColor: Colors.card },
   iconBox: {
-    width: 40, height: 40, borderRadius: 12,
+    width: 42, height: 42, borderRadius: 13,
     alignItems: 'center', justifyContent: 'center', flexShrink: 0,
   },
   rowContent: { flex: 1, gap: 3 },
-  rowTitle: { fontSize: 14, fontWeight: '500', color: Colors.textSecondary },
-  rowTitleUnread: { fontWeight: '700', color: Colors.text },
-  rowBody: { fontSize: 13, color: Colors.textSecondary, lineHeight: 18 },
-  rowTime: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
+  rowMessage: { fontSize: 14, fontWeight: '500', color: Colors.textSecondary, lineHeight: 20 },
+  rowMessageUnread: { fontWeight: '700', color: Colors.text },
+  tripNameRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  tripNameText: { fontSize: 12, color: Colors.textMuted },
+  rowTime: { fontSize: 11, color: Colors.textMuted, marginTop: 1 },
   unreadDot: {
     width: 8, height: 8, borderRadius: 4,
-    backgroundColor: Colors.primary, marginTop: 4, flexShrink: 0,
+    backgroundColor: Colors.primary, marginTop: 6, flexShrink: 0,
   },
 
-  empty: {
-    alignItems: 'center', paddingTop: 80,
-    paddingHorizontal: 40, gap: 14,
+  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, gap: 14 },
+  emptyIcon: {
+    width: 68, height: 68, borderRadius: 20,
+    backgroundColor: Colors.primaryDim,
+    alignItems: 'center', justifyContent: 'center', marginBottom: 4,
   },
   emptyTitle: { fontSize: 18, fontWeight: '700', color: Colors.text },
-  emptyText: {
-    fontSize: 14, color: Colors.textSecondary,
-    textAlign: 'center', lineHeight: 21,
-  },
+  emptyText: { fontSize: 14, color: Colors.textSecondary, textAlign: 'center', lineHeight: 21 },
 });
