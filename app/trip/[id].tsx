@@ -95,11 +95,14 @@ export default function TripScreen() {
       setParentTrip(null);
     }
 
-    if (!activeTab && tabsRes.data?.length) setActiveTab(tabsRes.data[0]);
+    setActiveTab(tabsRes.data?.[0] ?? null);
     setLoading(false);
   }
 
-  useEffect(() => { loadTrip(); }, [id]);
+  useEffect(() => {
+    setActiveTab(null);
+    loadTrip();
+  }, [id]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
