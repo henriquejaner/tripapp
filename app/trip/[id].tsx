@@ -484,20 +484,30 @@ function SplitsTab({ tripId, tripName, subTrips, members, refreshing, onRefresh,
 
 // ─── Map Tab ──────────────────────────────────────────────────────────────────
 
+const PLACES_KEY = process.env.EXPO_PUBLIC_GOOGLE_PLACES_KEY ?? '';
+
+const POI_TYPES = [
+  'restaurant', 'tourist_attraction', 'lodging', 'beach',
+  'bar', 'museum', 'park', 'night_club',
+];
+
+type MapLocation = { name: string; lat: number; lng: number; type: string; poiType?: string };
+
 function MapTab({ tripId, stops, refreshing, onRefresh }: {
   tripId: string; stops: TripStop[];
   refreshing: boolean; onRefresh: () => void;
 }) {
-  const [locations, setLocations] = useState<{ name: string; lat: number; lng: number; type: string }[]>([]);
+  const [locations, setLocations] = useState<MapLocation[]>([]);
   const [geocoding, setGeocoding] = useState(false);
 
   useEffect(() => { geocodeAll(); }, [stops, tripId]);
 
   async function geocodeAll() {
     setGeocoding(true);
-    const results: { name: string; lat: number; lng: number; type: string }[] = [];
+    const results: MapLocation[] = [];
+    const stopCoords: { name: string; lat: number; lng: number }[] = [];
 
-    // Geocode stops
+    // 1. Geocode stops via Nominatim
     for (const stop of stops) {
       if (!stop.destination) continue;
       try {
@@ -507,46 +517,84 @@ function MapTab({ tripId, stops, refreshing, onRefresh }: {
         );
         const data = await res.json();
         if (data[0]) {
-          results.push({
-            name: stop.destination,
-            lat: parseFloat(data[0].lat),
-            lng: parseFloat(data[0].lon),
-            type: 'stop',
-          });
+          const coord = { name: stop.destination, lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+          stopCoords.push(coord);
+          results.push({ ...coord, type: 'stop' });
         }
       } catch {}
     }
 
-    // Geocode confirmed ideas from Accommodation and Restaurants tabs
-    try {
-      const { data: ideas } = await supabase
-        .from('ideas')
-        .select('title, status')
-        .eq('trip_id', tripId);
+    if (PLACES_KEY && stopCoords.length > 0) {
+      // 2. Google Places Nearby Search for POIs around each stop
+      for (const coord of stopCoords) {
+        try {
+          const res = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Goog-Api-Key': PLACES_KEY,
+              'X-Goog-FieldMask': 'places.displayName,places.location,places.primaryType',
+            },
+            body: JSON.stringify({
+              locationRestriction: {
+                circle: { center: { latitude: coord.lat, longitude: coord.lng }, radius: 12000 },
+              },
+              includedTypes: POI_TYPES,
+              maxResultCount: 20,
+              rankPreference: 'POPULARITY',
+            }),
+          });
+          const data = await res.json();
+          for (const place of data.places ?? []) {
+            results.push({
+              name: place.displayName?.text ?? '',
+              lat: place.location.latitude,
+              lng: place.location.longitude,
+              type: 'poi',
+              poiType: place.primaryType ?? 'tourist_attraction',
+            });
+          }
+        } catch {}
+      }
 
-      if (ideas?.length && stops[0]?.destination) {
-        const city = stops[0].destination.split(',')[0].trim();
-        for (const idea of ideas.slice(0, 10)) {
+      // 3. Google Places Text Search to locate trip ideas
+      try {
+        const { data: ideas } = await supabase
+          .from('ideas')
+          .select('title, status')
+          .eq('trip_id', tripId);
+
+        for (const idea of (ideas ?? []).slice(0, 12)) {
           try {
-            const q = `${idea.title}, ${city}`;
-            const res = await fetch(
-              `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`,
-              { headers: { 'Accept-Language': 'en' } }
-            );
+            const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Goog-Api-Key': PLACES_KEY,
+                'X-Goog-FieldMask': 'places.displayName,places.location',
+              },
+              body: JSON.stringify({
+                textQuery: `${idea.title} near ${stopCoords[0].name}`,
+                locationBias: {
+                  circle: { center: { latitude: stopCoords[0].lat, longitude: stopCoords[0].lng }, radius: 50000 },
+                },
+                maxResultCount: 1,
+              }),
+            });
             const data = await res.json();
-            if (data[0] && parseFloat(data[0].importance) > 0.15) {
+            const p = data.places?.[0];
+            if (p) {
               results.push({
                 name: idea.title,
-                lat: parseFloat(data[0].lat),
-                lng: parseFloat(data[0].lon),
+                lat: p.location.latitude,
+                lng: p.location.longitude,
                 type: idea.status === 'confirmed' ? 'confirmed' : 'idea',
               });
             }
           } catch {}
-          await new Promise(r => setTimeout(r, 1100));
         }
-      }
-    } catch {}
+      } catch {}
+    }
 
     setLocations(results);
     setGeocoding(false);
@@ -600,7 +648,7 @@ function MapTab({ tripId, stops, refreshing, onRefresh }: {
   );
 }
 
-function generateMapHtml(locations: { name: string; lat: number; lng: number; type: string }[]): string {
+function generateMapHtml(locations: MapLocation[]): string {
   const markersJson = JSON.stringify(locations);
   return `<!DOCTYPE html>
 <html>
@@ -628,6 +676,22 @@ function generateMapHtml(locations: { name: string; lat: number; lng: number; ty
       font-size: 12px; font-weight: 500; color: #4a4540;
     }
     .leaflet-control-attribution { font-size: 9px; }
+    .legend {
+      position: absolute; bottom: 24px; left: 12px; z-index: 1000;
+      background: rgba(255,255,255,0.92); backdrop-filter: blur(6px);
+      border-radius: 10px; padding: 8px 12px;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 11px; color: #333;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+      display: flex; flex-direction: column; gap: 5px;
+    }
+    .legend-row { display: flex; align-items: center; gap: 7px; }
+    .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .legend-pill {
+      height: 14px; padding: 0 7px; border-radius: 7px;
+      display: inline-flex; align-items: center;
+      font-size: 10px; font-weight: 700; color: #fff;
+    }
   </style>
 </head>
 <body>
@@ -643,63 +707,86 @@ function generateMapHtml(locations: { name: string; lat: number; lng: number; ty
 
     var markers = ${markersJson};
 
-    function makeStopIcon(label) {
-      var html = '<div style="'
-        + 'background:#E8622A;'
-        + 'color:#fff;'
-        + 'font-family:-apple-system,sans-serif;'
-        + 'font-size:11px;font-weight:700;'
-        + 'padding:5px 10px;'
-        + 'border-radius:20px;'
-        + 'white-space:nowrap;'
-        + 'box-shadow:0 2px 8px rgba(0,0,0,0.25);'
-        + 'border:2px solid #fff;'
-        + '">' + label + '</div>';
-      return L.divIcon({ html: html, className: '', iconAnchor: [0, 0] });
+    var POI_COLORS = {
+      restaurant: '#E8622A',
+      bar: '#C0392B',
+      night_club: '#8E44AD',
+      lodging: '#3D7EFF',
+      tourist_attraction: '#F5A623',
+      museum: '#795548',
+      beach: '#00BCD4',
+      park: '#22C55E',
+      default: '#90A4AE',
+    };
+
+    function poiColor(poiType) {
+      return POI_COLORS[poiType] || POI_COLORS.default;
     }
 
-    function makeIdeaIcon(confirmed) {
-      var color = confirmed ? '#00A878' : '#3D7EFF';
-      var html = '<div style="'
-        + 'background:' + color + ';'
-        + 'width:11px;height:11px;border-radius:50%;'
-        + 'border:2.5px solid #fff;'
-        + 'box-shadow:0 1px 5px rgba(0,0,0,0.3);'
-        + '"></div>';
-      return L.divIcon({ html: html, className: '', iconSize: [11,11], iconAnchor: [5,5] });
+    function makeStopIcon(label) {
+      var html = '<div style="background:#E8622A;color:#fff;font-family:-apple-system,sans-serif;font-size:11px;font-weight:700;padding:5px 10px;border-radius:20px;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.3);border:2px solid #fff;">' + label + '</div>';
+      return L.divIcon({ html: html, className: '', iconAnchor: [0, 14] });
+    }
+
+    function makeDot(color, size, opacity) {
+      size = size || 10; opacity = opacity || 1;
+      var html = '<div style="background:' + color + ';width:' + size + 'px;height:' + size + 'px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.25);opacity:' + opacity + ';"></div>';
+      var half = size / 2;
+      return L.divIcon({ html: html, className: '', iconSize: [size, size], iconAnchor: [half, half] });
     }
 
     var stops = markers.filter(function(m) { return m.type === 'stop'; });
-    var ideas = markers.filter(function(m) { return m.type !== 'stop'; });
+    var pois = markers.filter(function(m) { return m.type === 'poi'; });
+    var ideas = markers.filter(function(m) { return m.type === 'idea' || m.type === 'confirmed'; });
 
-    // Draw route polyline between stops
+    // Route polyline between stops
     if (stops.length > 1) {
       L.polyline(stops.map(function(s) { return [s.lat, s.lng]; }), {
-        color: '#E8622A', weight: 2.5, opacity: 0.6, dashArray: '6, 8'
+        color: '#E8622A', weight: 2.5, opacity: 0.55, dashArray: '6, 9'
       }).addTo(map);
     }
 
     if (markers.length === 0) {
       map.setView([20, 10], 2);
     } else {
-      stops.forEach(function(m) {
-        L.marker([m.lat, m.lng], { icon: makeStopIcon(m.name) })
+      // POIs (faded, small)
+      pois.forEach(function(m) {
+        L.marker([m.lat, m.lng], { icon: makeDot(poiColor(m.poiType), 9, 0.7) })
           .addTo(map)
-          .bindPopup('<div class="stop-label">' + m.name + '</div>');
+          .bindPopup('<div style="font-family:-apple-system,sans-serif;font-size:12px;color:#333;">' + m.name + '</div>');
       });
+      // Idea markers
       ideas.forEach(function(m) {
         var confirmed = m.type === 'confirmed';
-        L.marker([m.lat, m.lng], { icon: makeIdeaIcon(confirmed) })
+        var color = confirmed ? '#00A878' : '#3D7EFF';
+        L.marker([m.lat, m.lng], { icon: makeDot(color, 13) })
           .addTo(map)
-          .bindPopup('<div class="idea-label">' + (confirmed ? '✓ ' : '') + m.name + '</div>');
+          .bindPopup('<div style="font-family:-apple-system,sans-serif;font-size:12px;font-weight:600;color:#333;">' + (confirmed ? '✓ ' : '') + m.name + '</div>');
       });
-      if (markers.length === 1) {
-        map.setView([markers[0].lat, markers[0].lng], 12);
+      // Stop markers on top
+      stops.forEach(function(m) {
+        L.marker([m.lat, m.lng], { icon: makeStopIcon(m.name) }).addTo(map);
+      });
+
+      var fitAll = stops.length > 0 ? stops : markers;
+      if (fitAll.length === 1) {
+        map.setView([fitAll[0].lat, fitAll[0].lng], 13);
       } else {
-        var bounds = L.latLngBounds(markers.map(function(m) { return [m.lat, m.lng]; }));
-        map.fitBounds(bounds, { padding: [48, 48] });
+        map.fitBounds(L.latLngBounds(fitAll.map(function(m) { return [m.lat, m.lng]; })), { padding: [48, 48] });
       }
     }
+
+    // Legend
+    var hasPois = pois.length > 0;
+    var legendHtml = '<div class="legend">'
+      + '<div class="legend-row"><div class="legend-pill" style="background:#E8622A;">Destination</div></div>'
+      + (ideas.filter(function(m){return m.type==='confirmed';}).length > 0 ? '<div class="legend-row"><div class="legend-dot" style="background:#00A878;border:2px solid #fff;"></div><span>Confirmed idea</span></div>' : '')
+      + (ideas.filter(function(m){return m.type==='idea';}).length > 0 ? '<div class="legend-row"><div class="legend-dot" style="background:#3D7EFF;border:2px solid #fff;"></div><span>Idea</span></div>' : '')
+      + (hasPois ? '<div class="legend-row"><div class="legend-dot" style="background:#E8622A;border:2px solid #fff;opacity:0.7;"></div><span style="color:#999;">Restaurants</span></div>' : '')
+      + (hasPois ? '<div class="legend-row"><div class="legend-dot" style="background:#3D7EFF;border:2px solid #fff;opacity:0.7;"></div><span style="color:#999;">Hotels</span></div>' : '')
+      + (hasPois ? '<div class="legend-row"><div class="legend-dot" style="background:#00BCD4;border:2px solid #fff;opacity:0.7;"></div><span style="color:#999;">Beaches</span></div>' : '')
+      + '</div>';
+    document.body.insertAdjacentHTML('beforeend', legendHtml);
   </script>
 </body>
 </html>`;
