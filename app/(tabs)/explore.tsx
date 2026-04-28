@@ -60,6 +60,46 @@ function isRecent(createdAt: string): boolean {
   return Date.now() - new Date(createdAt).getTime() < 7 * 24 * 60 * 60 * 1000;
 }
 
+function WeekendCard({ dest, color, photoUrl, tripCount, onPress }: {
+  dest: WeekendDest; color: string; photoUrl: string; tripCount: number; onPress: () => void;
+}) {
+  const [photoFailed, setPhotoFailed] = useState(false);
+  return (
+    <TouchableOpacity style={styles.weekendCard} onPress={onPress} activeOpacity={0.85}>
+      <View style={styles.weekendImageWrap}>
+        {!photoFailed ? (
+          <Image
+            source={{ uri: photoUrl }}
+            style={styles.weekendImage}
+            resizeMode="cover"
+            onError={() => setPhotoFailed(true)}
+          />
+        ) : (
+          <View style={[styles.weekendImage, { backgroundColor: color + '33' }]} />
+        )}
+        <View style={styles.weekendImageOverlay} />
+        <View style={[styles.weekendVibePill, { backgroundColor: color }]}>
+          <FontAwesome name={(VIBE_ICON[dest.vibe] ?? 'map-marker') as any} size={9} color="#fff" />
+        </View>
+        {tripCount > 0 && (
+          <View style={styles.weekendTripBadge}>
+            <Text style={styles.weekendTripBadgeText}>{tripCount} trip{tripCount !== 1 ? 's' : ''}</Text>
+          </View>
+        )}
+      </View>
+      <View style={styles.weekendBody}>
+        <Text style={styles.weekendCity}>{dest.destination}</Text>
+        <Text style={styles.weekendCountry}>{dest.country}</Text>
+        <View style={styles.weekendMeta}>
+          <FontAwesome name="clock-o" size={9} color={Colors.textMuted} />
+          <Text style={styles.weekendMetaText}>{dest.flightHours}</Text>
+        </View>
+        <Text style={[styles.weekendBudget, { color }]}>~€{dest.budgetPerDay}/day</Text>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
 export default function DiscoverScreen() {
   const [search, setSearch] = useState('');
   const [publicTrips, setPublicTrips] = useState<PublicTrip[]>([]);
@@ -405,46 +445,6 @@ Return ONLY a valid raw JSON array (no markdown, no code blocks):
         renderItem={({ item }) => <PublicTripCard trip={item} />}
       />
     </SafeAreaView>
-  );
-}
-
-function WeekendCard({ dest, color, photoUrl, tripCount, onPress }: {
-  dest: WeekendDest; color: string; photoUrl: string; tripCount: number; onPress: () => void;
-}) {
-  const [photoFailed, setPhotoFailed] = useState(false);
-  return (
-    <TouchableOpacity style={styles.weekendCard} onPress={onPress} activeOpacity={0.85}>
-      <View style={styles.weekendImageWrap}>
-        {!photoFailed ? (
-          <Image
-            source={{ uri: photoUrl }}
-            style={styles.weekendImage}
-            resizeMode="cover"
-            onError={() => setPhotoFailed(true)}
-          />
-        ) : (
-          <View style={[styles.weekendImage, { backgroundColor: color + '33' }]} />
-        )}
-        <View style={styles.weekendImageOverlay} />
-        <View style={[styles.weekendVibePill, { backgroundColor: color }]}>
-          <FontAwesome name={(VIBE_ICON[dest.vibe] ?? 'map-marker') as any} size={9} color="#fff" />
-        </View>
-        {tripCount > 0 && (
-          <View style={styles.weekendTripBadge}>
-            <Text style={styles.weekendTripBadgeText}>{tripCount} trip{tripCount !== 1 ? 's' : ''}</Text>
-          </View>
-        )}
-      </View>
-      <View style={styles.weekendBody}>
-        <Text style={styles.weekendCity}>{dest.destination}</Text>
-        <Text style={styles.weekendCountry}>{dest.country}</Text>
-        <View style={styles.weekendMeta}>
-          <FontAwesome name="clock-o" size={9} color={Colors.textMuted} />
-          <Text style={styles.weekendMetaText}>{dest.flightHours}</Text>
-        </View>
-        <Text style={[styles.weekendBudget, { color }]}>~€{dest.budgetPerDay}/day</Text>
-      </View>
-    </TouchableOpacity>
   );
 }
 
