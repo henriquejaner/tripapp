@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useMemo } from 'react';
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   SafeAreaView, TextInput, ScrollView, ActivityIndicator, Image,
@@ -60,20 +60,36 @@ function isRecent(createdAt: string): boolean {
   return Date.now() - new Date(createdAt).getTime() < 7 * 24 * 60 * 60 * 1000;
 }
 
-function WeekendCard({ dest, color, photoUrl, tripCount, onPress }: {
-  dest: WeekendDest; color: string; photoUrl: string; tripCount: number; onPress: () => void;
+function WeekendCard({ dest, color, tripCount, onPress }: {
+  dest: WeekendDest; color: string; tripCount: number; onPress: () => void;
 }) {
-  const [photoFailed, setPhotoFailed] = useState(false);
+  const [photoUri, setPhotoUri] = useState<string | null>(null);
+
+  useEffect(() => {
+    const key = process.env.EXPO_PUBLIC_GOOGLE_PLACES_KEY;
+    if (!key) return;
+    fetch('https://places.googleapis.com/v1/places:searchText', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': key,
+        'X-Goog-FieldMask': 'places.photos',
+      },
+      body: JSON.stringify({ textQuery: `${dest.destination} ${dest.country}`, pageSize: 1 }),
+    })
+      .then(r => r.json())
+      .then(data => {
+        const name = data.places?.[0]?.photos?.[0]?.name;
+        if (name) setPhotoUri(`https://places.googleapis.com/v1/${name}/media?maxWidthPx=400&key=${key}`);
+      })
+      .catch(() => {});
+  }, [dest.destination]);
+
   return (
     <TouchableOpacity style={styles.weekendCard} onPress={onPress} activeOpacity={0.85}>
       <View style={styles.weekendImageWrap}>
-        {!photoFailed ? (
-          <Image
-            source={{ uri: photoUrl }}
-            style={styles.weekendImage}
-            resizeMode="cover"
-            onError={() => setPhotoFailed(true)}
-          />
+        {photoUri ? (
+          <Image source={{ uri: photoUri }} style={styles.weekendImage} resizeMode="cover" />
         ) : (
           <View style={[styles.weekendImage, { backgroundColor: color + '33' }]} />
         )}
@@ -393,7 +409,6 @@ Return ONLY a valid raw JSON array (no markdown, no code blocks):
               >
                 {weekendPicks.map(d => {
                   const color = VIBE_COLOR[d.vibe] ?? Colors.primary;
-                  const photoUrl = `https://source.unsplash.com/400x220/?${encodeURIComponent(d.destination)},travel,city`;
                   const tripCount = trendingDests.find(t =>
                     t.destination.toLowerCase().includes(d.destination.toLowerCase())
                   )?.count ?? 0;
@@ -402,7 +417,6 @@ Return ONLY a valid raw JSON array (no markdown, no code blocks):
                       key={d.destination}
                       dest={d}
                       color={color}
-                      photoUrl={photoUrl}
                       tripCount={tripCount}
                       onPress={() => setSearch(d.destination)}
                     />
